@@ -1,4 +1,9 @@
 {
+    "plugin": {
+        "name": "SAM-Audio",
+        "description": "Text-prompted sound separation with Meta SAM-Audio — denoise, isolate vocals, or extract any described sound.",
+        "icon": "/plugins/tongflow-modal-sam-audio.svg"
+    },
     "env": [
         {
             "key": "MODAL_TOKEN_ID",
