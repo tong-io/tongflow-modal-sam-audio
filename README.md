@@ -7,6 +7,7 @@ Official [TongFlow](https://github.com/tong-io/tongflow) plugin. Text-prompted s
 - **Noise reduction** (`denoise_audio`) — isolate the clean speech from a noisy recording.
 - **Vocal separation** (`separate_audio_track`) — pull the vocals out of a mix.
 - **Extract track** (`music-extract`) — isolate *any* sound described in free text ("dog barking", "the piano in the background", "drums"), not just fixed stem names.
+- **Separate sound** (`separate-sound`) — split the audio into a described **target** and the **residual** (everything else) in one pass, so the same node covers "extract this sound" and "remove this sound". Optional time spans mark where the target occurs, which also enables picking out one specific speaker.
 
 ## Credentials
 

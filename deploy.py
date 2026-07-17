@@ -1,9 +1,11 @@
 """Modal deploy entry for SAM-Audio (Meta, text-prompted sound separation).
 
-Implements three ABI slots with one model:
+Implements four ABI slots with one model:
   - ``denoise_audio``         -> isolate the primary content (default: speech)
   - ``separate_audio_track``  -> isolate the vocals from a mix
   - ``music-extract``         -> isolate any sound described by ``track`` text
+  - ``separate-sound``        -> split into target/residual by free-text
+                                 description, with optional time-span anchors
 
 SAM-Audio separates any sound from a mixture given a natural-language
 description; the ``track`` field of music-extract is passed through verbatim,
@@ -33,6 +35,7 @@ from tongflow.models.separate_audio_track import (
     SeparateAudioTrackInput,
     SeparateAudioTrackOutput,
 )
+from tongflow.models.separate_sound import SeparateSoundInput, SeparateSoundOutput
 from tongflow.node_slots import NodeSlots
 from tongflow.protocol import asset, asset_as_path
 from tongflow.slots import node_slot
@@ -73,7 +76,7 @@ image = (
     )
     .pip_install("soundfile", "numpy")
     .pip_install(f"git+{REPO_URL}@{REPO_REV}")
-    .pip_install("tongflow==0.2.6")
+    .pip_install("tongflow==0.2.7")
     # All HF downloads (checkpoint, T5, judge, CLAP, PE span predictor) cache
     # on the shared volume so cold starts after the first are download-free.
     .env({"HF_HOME": "/models/hf"})
@@ -145,23 +148,44 @@ class Inference:
             )
         return wav
 
-    def _separate(self, media: Any, description: str) -> bytes:
-        """Isolate ``description`` from the mixture; return WAV bytes."""
+    def _separate_pair(
+        self,
+        media: Any,
+        description: str,
+        anchors: list[list[tuple[str, float, float]]] | None = None,
+    ) -> tuple[bytes, bytes]:
+        """Split the mixture on ``description``; return (target, residual) WAVs.
+
+        ``anchors`` are user-supplied positive time spans; when present they
+        replace automatic span prediction (the two prompt the model the same
+        way, and explicit spans are authoritative).
+        """
         with contextlib.ExitStack() as stack:
             wav = self._as_wav(stack, media)
-            batch = self.processor(audios=[wav], descriptions=[description]).to(
-                "cuda"
-            )
+            kwargs: dict[str, Any] = {"audios": [wav], "descriptions": [description]}
+            if anchors:
+                kwargs["anchors"] = anchors
+            batch = self.processor(**kwargs).to("cuda")
             with torch.inference_mode():
                 result = self.model.separate(
                     batch,
-                    predict_spans=PREDICT_SPANS,
+                    predict_spans=False if anchors else PREDICT_SPANS,
                     reranking_candidates=RERANK,
                 )
-        target = result.target[0].cpu().numpy()
-        buf = io.BytesIO()
-        sf.write(buf, target, self.model.sample_rate, format="WAV")
-        return buf.getvalue()
+
+        def to_wav(track: "torch.Tensor") -> bytes:
+            buf = io.BytesIO()
+            sf.write(
+                buf, track[0].cpu().numpy(), self.model.sample_rate, format="WAV"
+            )
+            return buf.getvalue()
+
+        return to_wav(result.target), to_wav(result.residual)
+
+    def _separate(self, media: Any, description: str) -> bytes:
+        """Isolate ``description`` from the mixture; return target WAV bytes."""
+        target, _ = self._separate_pair(media, description)
+        return target
 
     @modal.method()
     @node_slot(NodeSlots.DENOISE_AUDIO)
@@ -184,6 +208,27 @@ class Inference:
         return SeparateAudioTrackOutput(
             success=True,
             file_key=asset(raw, mime="audio/wav", filename="separated_vocals.wav"),
+        )
+
+    @modal.method()
+    @node_slot(NodeSlots.SEPARATE_SOUND)
+    def separate_sound(self, input: SeparateSoundInput) -> SeparateSoundOutput:
+        try:
+            text = (input.text or "").strip()
+            if not text:
+                raise RuntimeError("text description is required")
+            anchors = None
+            if input.spans:
+                anchors = [
+                    [("+", float(s.start), float(s.end)) for s in input.spans]
+                ]
+            target, residual = self._separate_pair(input.audio, text, anchors)
+        except Exception as e:
+            return SeparateSoundOutput(success=False, error=str(e))
+        return SeparateSoundOutput(
+            success=True,
+            target=asset(target, mime="audio/wav", filename="target.wav"),
+            residual=asset(residual, mime="audio/wav", filename="residual.wav"),
         )
 
     @modal.method()
