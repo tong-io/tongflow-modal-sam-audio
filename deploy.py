@@ -40,6 +40,11 @@ from tongflow.node_slots import NodeSlots
 from tongflow.protocol import asset, asset_as_path
 from tongflow.slots import node_slot
 
+# Slots this plugin is the default implementation of: the node picker lists
+# it first and a newly added node preselects it. Read statically by the
+# scanner (never executed), so any SDK version imports this file fine.
+TONGFLOW_DEFAULT_SLOTS = ["music-extract"]
+
 REPO_URL = "https://github.com/facebookresearch/sam-audio.git"
 # Pin the upstream revision so redeploys are reproducible (main moves).
 REPO_REV = "bb4c6999d2677c7402360e426afc01ddfad6dce0"
