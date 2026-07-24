@@ -81,7 +81,7 @@ image = (
     )
     .pip_install("soundfile", "numpy")
     .pip_install(f"git+{REPO_URL}@{REPO_REV}")
-    .pip_install("tongflow==0.2.13", "fastapi[standard]")
+    .pip_install("tongflow==0.2.16", "fastapi[standard]")
     # All HF downloads (checkpoint, T5, judge, CLAP, PE span predictor) cache
     # on the shared volume so cold starts after the first are download-free.
     .env({"HF_HOME": "/models/hf"})
